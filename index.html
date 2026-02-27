@@ -116,7 +116,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#060e07;color:#f0e6c
 .bank-cell-sub{font-size:0.5rem;color:var(--muted)}
 
 /* table area */
-.table-area{flex:1;position:relative;overflow:hidden}
+.table-area{flex:1;position:relative;overflow:hidden;min-height:0}
 .table-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
 #tableOuter{position:absolute;border-radius:36px;background:linear-gradient(135deg,var(--rail2),var(--rail));box-shadow:0 8px 32px rgba(0,0,0,0.6)}
 #tableFelt{position:absolute;border-radius:28px;background:radial-gradient(ellipse at 50% 40%,var(--felt-top),var(--felt-mid) 55%,var(--felt-bot));display:flex;align-items:center;justify-content:center}
@@ -363,7 +363,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#060e07;color:#f0e6c
       <div class="bank-cell"><div class="bank-cell-lbl">⚡ Status</div><div class="bank-cell-val" id="bcStatus">0 Active</div><div class="bank-cell-sub" id="bcStatusSub"></div></div>
     </div>
   </div>
-  <div style="display:flex;flex:1;overflow:hidden">
+  <div style="display:flex;flex:1;overflow:hidden;min-height:0">
     <div class="table-area" id="tableArea">
       <div class="table-wrap" id="tableWrap">
         <div id="tableOuter"></div>
@@ -428,8 +428,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:#060e07;color:#f0e6c
       <div style="font-size:0.5rem;color:var(--muted);margin-top:4px">You'll need to enter this to start the game from the lobby</div>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" id="ngCancelBtn" onclick="closeNewGame()">Cancel</button>
-      <button class="btn-primary" id="ngConfirmBtn" onclick="confirmNewGame()">Create Game</button>
+      <button class="btn-cancel" id="ngCancelBtn">Cancel</button>
+      <button class="btn-primary" id="ngConfirmBtn">Create Game</button>
     </div>
   </div>
 </div>
@@ -504,8 +504,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:#060e07;color:#f0e6c
       <div class="phone-row"><span class="phone-flag">🇦🇺</span><input type="tel" class="phone-inp" id="assignPhone" placeholder="04xx xxx xxx"></div>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" id="assignCancelBtn" onclick="closeAssign()">Cancel</button>
-      <button class="btn-primary" id="assignConfirmBtn" onclick="confirmAssign()">Seat Player</button>
+      <button class="btn-cancel" id="assignCancelBtn">Cancel</button>
+      <button class="btn-primary" id="assignConfirmBtn">Seat Player</button>
     </div>
   </div>
 </div>
@@ -1686,7 +1686,7 @@ function renderTable() {
   if (!state.game) return;
   const wrap = document.getElementById('tableWrap');
   const W = wrap.offsetWidth, H = wrap.offsetHeight;
-  if (!W || !H) return;
+  if (!W || !H) { setTimeout(renderTable, 80); return; } // retry once layout settles
 
   // Vertical rectangle: taller than wide, scales with screen
   const tH = Math.min(H * 0.72, 480);
@@ -1852,12 +1852,15 @@ function confirmAssign() {
   const phone = (document.getElementById('assignPhone').value || '').trim();
   if (phone) setPhone(name, phone);
   const sid = assigningSid; // capture BEFORE closeAssign nulls it
-  state.players[sid] = { name, transactions: [] };
+  // Preserve existing player data if re-assigning (e.g. name change)
+  const existing = state.players[sid] || {};
+  state.players[sid] = { ...existing, name, transactions: existing.transactions || [] };
   addHistory(name);
   saveState();
+  syncToCloud().catch(() => {}); // push to cloud immediately so it isn't overwritten
   closeAssign();
   renderTable();
-  setTimeout(() => openPanel(sid), 50); // slight delay so panel renders after table
+  setTimeout(() => openPanel(sid), 100);
 }
 
 // ════════════════════════════════════════════════════════
@@ -3585,14 +3588,45 @@ async function doStartGame() {
 // ════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
 
-  // Home
-  document.getElementById('homeAddBtn').addEventListener('click', openNewGame);
+  // Click-outside handlers for overlays (can't use onclick= for these)
+  document.getElementById('newGameOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('newGameOverlay')) closeNewGame();
+  });
+  document.getElementById('assignOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('assignOverlay')) closeAssign();
+  });
+  document.getElementById('lbSheet').addEventListener('click', e => {
+    if (e.target === document.getElementById('lbSheet')) closeLbSheet();
+  });
+  document.getElementById('shareSheet').addEventListener('click', e => {
+    if (e.target === document.getElementById('shareSheet')) closeShare();
+  });
+  document.getElementById('publishSheet').addEventListener('click', e => {
+    if (e.target === document.getElementById('publishSheet')) closePublish();
+  });
+  document.getElementById('pwOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('pwOverlay'))
+      document.getElementById('pwOverlay').classList.remove('show');
+  });
 
-  // New game overlay
-  document.getElementById('ngCancelBtn').addEventListener('click', closeNewGame);
-  document.getElementById('ngConfirmBtn').addEventListener('click', confirmNewGame);
+  // Input Enter key handlers
+  document.getElementById('ngName').addEventListener('keydown', e => {
+    if (e.key === 'Enter') confirmNewGame();
+  });
+  document.getElementById('assignName').addEventListener('keydown', e => {
+    if (e.key === 'Enter') confirmAssign();
+  });
+  document.getElementById('assignName').addEventListener('input', () => {
+    const n = document.getElementById('assignName').value.trim();
+    if (!n) return;
+    const ph = getPhone(n);
+    if (ph) document.getElementById('assignPhone').value = ph.startsWith('61') ? '0' + ph.slice(2) : ph;
+  });
+  document.getElementById('pwInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('pwConfirmBtn').click();
+  });
 
-  // Notification banner
+  // Notification enable button (async handler)
   document.getElementById('notifEnableBtn').addEventListener('click', async () => {
     document.getElementById('notifBanner').style.display = 'none';
     await registerServiceWorker();
@@ -3603,134 +3637,6 @@ document.addEventListener('DOMContentLoaded', function() {
       toast('Notifications enabled!');
     }
   });
-  document.getElementById('notifDismissBtn').addEventListener('click', () => {
-    document.getElementById('notifBanner').style.display = 'none';
-    localStorage.setItem('notifDismissed', '1');
-  });
-  document.getElementById('newGameOverlay').addEventListener('click', e => { if (e.target === document.getElementById('newGameOverlay')) closeNewGame(); });
-  document.getElementById('ngName').addEventListener('keydown', e => { if (e.key === 'Enter') confirmNewGame(); });
-
-  // Game screen buttons
-  document.getElementById('backBtn').addEventListener('click', () => renderHome());
-  document.getElementById('settleBtn').addEventListener('click', openSettleUp);
-  document.getElementById('lbInGameBtn').addEventListener('click', openLeaderboard);
-  document.getElementById('endGameBtn').addEventListener('click', endGame);
-  document.getElementById('bankBar').addEventListener('click', toggleBank);
-  document.getElementById('shareBtn').addEventListener('click', e => { e.stopPropagation(); openShare(); });
-  document.getElementById('publishBtn').addEventListener('click', openPublish);
-
-  // Panel
-  document.getElementById('panelCloseBtn').addEventListener('click', closePanel);
-
-  // Assign overlay
-  document.getElementById('assignCancelBtn').addEventListener('click', closeAssign);
-  document.getElementById('assignConfirmBtn').addEventListener('click', confirmAssign);
-  document.getElementById('assignOverlay').addEventListener('click', e => { if (e.target === document.getElementById('assignOverlay')) closeAssign(); });
-  document.getElementById('assignName').addEventListener('keydown', e => { if (e.key === 'Enter') confirmAssign(); });
-  document.getElementById('assignName').addEventListener('input', () => {
-    const n = document.getElementById('assignName').value.trim();
-    if (!n) return;
-    const ph = getPhone(n);
-    if (ph) document.getElementById('assignPhone').value = ph.startsWith('61') ? '0' + ph.slice(2) : ph;
-  });
-
-  // Leaderboard sheet
-  document.getElementById('lbCloseBtn').addEventListener('click', closeLbSheet);
-  document.getElementById('lbSheet').addEventListener('click', e => { if (e.target === document.getElementById('lbSheet')) closeLbSheet(); });
-
-  // Share sheet
-  document.getElementById('shareCloseBtn').addEventListener('click', closeShare);
-  document.getElementById('shareCloseBtn2').addEventListener('click', closeShare);
-  document.getElementById('copyShareBtn').addEventListener('click', () => { copyText(document.getElementById('shareUrl').textContent); });
-  document.getElementById('shareSheet').addEventListener('click', e => { if (e.target === document.getElementById('shareSheet')) closeShare(); });
-
-  // Publish sheet
-  document.getElementById('publishCloseBtn').addEventListener('click', closePublish);
-  document.getElementById('copyPublishBtn').addEventListener('click', () => { copyText(document.getElementById('publishUrl').value); });
-  document.getElementById('previewPublishBtn').addEventListener('click', () => { window.open(document.getElementById('publishUrl').value, '_blank'); });
-  document.getElementById('publishSheet').addEventListener('click', e => { if (e.target === document.getElementById('publishSheet')) closePublish(); });
-
-  // WA toast
-  document.getElementById('waToastClose').addEventListener('click', hideWaToast);
-  document.getElementById('waToastSkip').addEventListener('click', hideWaToast);
-  document.getElementById('waToastSend').addEventListener('click', () => setTimeout(hideWaToast, 500));
-
-  // Lobby buttons
-  document.getElementById('lobbyMinimiseBtn').addEventListener('click', () => {
-    // Close the overlay but keep the poll running so home screen RSVP list updates live
-    document.getElementById('lobbyOverlay').classList.remove('show');
-    renderHome(); // go back to home — lobby card will show there
-    toast('Lobby saved — RSVP list updates automatically');
-  });
-
-  document.getElementById('lobbyStartBtn').addEventListener('click', () => {
-    const pw = state.game && state.game.password;
-    if (pw) {
-      window._pwCallback = doStartGame;
-      document.getElementById('pwInput').value = '';
-      document.getElementById('pwError').textContent = '';
-      document.getElementById('pwOverlay').classList.add('show');
-      setTimeout(() => document.getElementById('pwInput').focus(), 100);
-    } else {
-      doStartGame();
-    }
-  });
-
-  document.getElementById('pwCancelBtn').addEventListener('click', () => {
-    document.getElementById('pwOverlay').classList.remove('show');
-  });
-  document.getElementById('pwConfirmBtn').addEventListener('click', () => {
-    const entered = (document.getElementById('pwInput').value || '').trim();
-    const correct = state.game && state.game.password;
-    if (entered !== correct) {
-      document.getElementById('pwError').textContent = 'Incorrect password — try again';
-      document.getElementById('pwInput').value = '';
-      setTimeout(() => document.getElementById('pwInput').focus(), 50);
-      return;
-    }
-    document.getElementById('pwOverlay').classList.remove('show');
-    // Call the registered callback (either doStartGame or openGame)
-    const cb = window._pwCallback || openGame;
-    window._pwCallback = null;
-    cb();
-  });
-  document.getElementById('pwInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') document.getElementById('pwConfirmBtn').click();
-  });
-  document.getElementById('pwOverlay').addEventListener('click', e => {
-    if (e.target === document.getElementById('pwOverlay')) document.getElementById('pwOverlay').classList.remove('show');
-  });
-
-  document.getElementById('lobbyCancelBtn').addEventListener('click', () => {
-    if (confirm('Cancel this game? All RSVP seats will be lost.')) {
-      closeLobby();
-      state.game = null; state.players = {};
-      saveState();
-      stopSyncPolling();
-      renderHome();
-    }
-  });
-
-  // Resize
-  let _rt;
-  window.addEventListener('resize', () => { clearTimeout(_rt); _rt = setTimeout(renderTable, 120); });
-  window.addEventListener('orientationchange', () => setTimeout(renderTable, 350));
-
-  // INIT
-  // Inject PWA manifest dynamically
-  const manifest = {
-    name: 'The Table',
-    short_name: 'The Table',
-    start_url: '/',
-    display: 'standalone',
-    background_color: '#050f06',
-    theme_color: '#1e6b2a',
-    icons: [
-      { src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="%231e6b2a"/><text y="0.9em" font-size="80" x="10">%E2%99%A0</text></svg>', sizes: '192x192', type: 'image/svg+xml' }
-    ]
-  };
-  const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-  document.getElementById('manifestLink').href = URL.createObjectURL(manifestBlob);
 
   seedData();
   loadState();
@@ -3763,7 +3669,6 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     }
   } else if (!checkResultsView() && !checkLiveView()) {
-    // Even without cloudRole, if we have a local game in progress, restore it
     if (state.game && !state.game.ended) {
       setCloudRole('host', state.game.code || 'LOCAL', 'Host');
       openGame();
@@ -3771,7 +3676,6 @@ document.addEventListener('DOMContentLoaded', function() {
       renderHome();
     }
   }
-});
-</script>
+});</script>
 </body>
 </html>
