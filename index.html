@@ -428,8 +428,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:#060e07;color:#f0e6c
       <div style="font-size:0.5rem;color:var(--muted);margin-top:4px">You'll need to enter this to start the game from the lobby</div>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" id="ngCancelBtn">Cancel</button>
-      <button class="btn-primary" id="ngConfirmBtn">Create Game</button>
+      <button class="btn-cancel" id="ngCancelBtn" onclick="closeNewGame()">Cancel</button>
+      <button class="btn-primary" id="ngConfirmBtn" onclick="confirmNewGame()">Create Game</button>
     </div>
   </div>
 </div>
@@ -504,8 +504,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:#060e07;color:#f0e6c
       <div class="phone-row"><span class="phone-flag">🇦🇺</span><input type="tel" class="phone-inp" id="assignPhone" placeholder="04xx xxx xxx"></div>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" id="assignCancelBtn">Cancel</button>
-      <button class="btn-primary" id="assignConfirmBtn">Seat Player</button>
+      <button class="btn-cancel" id="assignCancelBtn" onclick="closeAssign()">Cancel</button>
+      <button class="btn-primary" id="assignConfirmBtn" onclick="confirmAssign()">Seat Player</button>
     </div>
   </div>
 </div>
