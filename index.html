@@ -598,7 +598,7 @@ let state = { game: null, players: {} };
 // CLOUD / WORKER CONFIG
 // ════════════════════════════════════════════════════════
 const WORKER_URL    = 'https://the-table-worker.jeemit1.workers.dev';
-const APP_URL       = (typeof location !== 'undefined') ? location.origin : 'https://the-table-worker.jeemit1.workers.dev';
+const APP_URL       = (typeof location !== 'undefined') ? location.origin : 'https://the-table-three.vercel.app';
 
 // Fetch with a timeout so slow/unreachable worker never hangs the UI
 function fetchWithTimeout(url, opts = {}, ms = 5000) {
