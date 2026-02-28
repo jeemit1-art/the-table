@@ -2664,9 +2664,12 @@ async function showInstallScreen(groupId) {
 
   const isIOS     = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isAndroid = /android/i.test(navigator.userAgent);
-  const isStandalone = window.navigator.standalone === true
+  // iOS 16.4+ supports push only when running as installed PWA (standalone)
+  const isStandaloneNow = window.navigator.standalone === true
     || window.matchMedia('(display-mode: standalone)').matches;
-  const hasPush   = 'PushManager' in window && 'serviceWorker' in navigator;
+  const iosVersion = isIOS ? parseInt((navigator.userAgent.match(/OS (\d+)_/) || [0,0])[1]) : 99;
+  const iosPushSupported = !isIOS || (iosVersion >= 16 && isStandaloneNow);
+  const hasPush   = 'PushManager' in window && 'serviceWorker' in navigator && iosPushSupported;
   const notifPerm = 'Notification' in window ? Notification.permission : 'unsupported';
 
   showScreen('liveScreen');
@@ -2751,8 +2754,12 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
                ⚠️ Notifications are blocked.<br>
                ${isIOS ? 'Go to: Settings → The Table → Notifications → Allow' : 'Go to: Settings → App Notifications → Allow'}
              </div>`
-          : `<button id="enableNotifBtn" style="width:100%;padding:12px;background:linear-gradient(135deg,#1e6b2a,#0f4a1a);color:#fff;border:none;border-radius:9px;font-family:DM Sans,sans-serif;font-size:0.84rem;font-weight:700;cursor:pointer">🔔 Enable Notifications</button>
-             <div id="notifBtnStatus" style="font-size:0.85rem;color:var(--muted);text-align:center;margin-top:6px;min-height:16px"></div>`
+          : (!hasPush && isIOS && !isStandalone
+            ? `<div style="font-size:0.88rem;color:var(--gold);line-height:1.7;padding:10px;background:rgba(201,168,76,0.08);border-radius:8px">
+                 ⚠️ Open the app from your <b>Home Screen</b> first, then tap this link again to enable notifications.
+               </div>`
+            : `<button id="enableNotifBtn" style="width:100%;padding:12px;background:linear-gradient(135deg,#1e6b2a,#0f4a1a);color:#fff;border:none;border-radius:9px;font-family:DM Sans,sans-serif;font-size:0.84rem;font-weight:700;cursor:pointer">🔔 Enable Notifications</button>
+               <div id="notifBtnStatus" style="font-size:0.85rem;color:var(--muted);text-align:center;margin-top:6px;min-height:16px"></div>`)
         )}
       </div>
 
@@ -2806,7 +2813,8 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
           new Promise(res => setTimeout(() => res('timeout'), 10000))
         ]);
         if (perm === 'granted') {
-          renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone, hasPush, 'granted');
+          const nowStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+          renderInstallScreen(groupId, groupName, isIOS, isAndroid, nowStandalone, hasPush, 'granted');
         } else if (perm === 'timeout') {
           if (statusEl) statusEl.textContent = 'Timed out — please try again';
           enableBtn.textContent = '🔔 Enable Notifications'; enableBtn.disabled = false;
@@ -2828,7 +2836,12 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
       const name = (document.getElementById('installName').value || '').trim();
       const statusEl = document.getElementById('installStatus');
       if (!name) { statusEl.textContent = 'Please enter your name'; return; }
-      if (notifPerm !== 'granted') { statusEl.textContent = 'Please enable notifications first (Step 2)'; return; }
+      // Re-read permission live — it may have been granted since render
+      const currentPerm = ('Notification' in window) ? Notification.permission : 'denied';
+      if (currentPerm !== 'granted') {
+        // Still allow registration — just won't receive push notifications
+        statusEl.textContent = 'Tip: Enable notifications for game alerts';
+      }
       regBtn.textContent = 'Registering…'; regBtn.disabled = true;
       statusEl.textContent = 'Setting up service worker…';
       try {
@@ -2840,19 +2853,15 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
         statusEl.textContent = 'Subscribing to notifications…';
         // Give SW a moment to activate (blob SW doesn't support .ready)
         if (swReg) await new Promise(r => setTimeout(r, 800));
-        const sub = await subscribePushToGroup(name, null);
-        if (sub) {
-          // Mark this group as registered so step3Done is accurate
-          localStorage.setItem('registeredGroup_' + groupId, name);
-          statusEl.textContent = '✓ Registered!';
-          await new Promise(r => setTimeout(r, 500));
-          renderInstallScreen(groupId, groupName, isIOS, isAndroid,
-            window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches,
-            hasPush, 'granted');
-        } else {
-          statusEl.textContent = '✗ Subscription failed — are notifications enabled?';
-          regBtn.textContent = 'Try Again'; regBtn.disabled = false;
-        }
+        // Try push subscription but don't block registration on it
+        const sub = await subscribePushToGroup(name, null).catch(() => null);
+        // Always mark as registered — name is saved regardless of push
+        localStorage.setItem('registeredGroup_' + groupId, name);
+        statusEl.textContent = sub ? '✓ Registered with notifications!' : '✓ Registered! (No push — notifications may be off)';
+        await new Promise(r => setTimeout(r, 600));
+        const nowStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+        const nowPerm = ('Notification' in window) ? Notification.permission : 'denied';
+        renderInstallScreen(groupId, groupName, isIOS, isAndroid, nowStandalone, hasPush, nowPerm);
       } catch(e) {
         statusEl.textContent = '✗ Error: ' + e.message;
         regBtn.textContent = 'Try Again'; regBtn.disabled = false;
