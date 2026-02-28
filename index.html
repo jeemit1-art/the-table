@@ -340,37 +340,8 @@ html,body{
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 </style>
-<script>
-// Inject PWA manifest as blob URL so it works from any host
-(function() {
-  var manifest = {
-    name: "The Table",
-    short_name: "The Table",
-    description: "Private poker game tracker for your crew",
-    start_url: "./",
-    display: "standalone",
-    orientation: "portrait",
-    background_color: "#060e07",
-    theme_color: "#060e07",
-    icons: [
-      {
-        src: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="100" fill="#060e07"/><text y="0.9em" font-size="320" text-anchor="middle" x="256" fill="#c9a84c">♠</text></svg>'),
-        sizes: "512x512",
-        type: "image/svg+xml",
-        purpose: "any maskable"
-      }
-    ],
-    categories: ["games", "utilities"],
-    lang: "en"
-  };
-  var blob = new Blob([JSON.stringify(manifest)], {type: 'application/manifest+json'});
-  var url = URL.createObjectURL(blob);
-  document.getElementById('manifestLink').href = url;
-})();
-</script>
-
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <link rel="manifest" id="manifestLink">
+  <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#050f06">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -803,7 +774,14 @@ async function subscribePush(playerName, gameCode) {
 async function subscribePushToGroup(playerName, gameCode) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
   try {
-    const reg = await navigator.serviceWorker.ready;
+    // Use getRegistration instead of .ready — blob SW doesn't resolve .ready on iOS
+    let reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) {
+      reg = await registerServiceWorker();
+      if (reg) await new Promise(r => setTimeout(r, 1000));
+      reg = await navigator.serviceWorker.getRegistration();
+    }
+    if (!reg) return null;
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
       sub = await reg.pushManager.subscribe({
@@ -837,33 +815,10 @@ function urlBase64ToUint8Array(base64String) {
 
 // ── Service Worker registration + inline SW ─────────────
 function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) return Promise.resolve();
-  // Inline SW as blob — works from any host (Vercel, GitHub Pages, etc.)
-  const swCode = `
-self.addEventListener('install', e => { self.skipWaiting(); });
-self.addEventListener('activate', e => { e.waitUntil(self.clients.claim()); });
-self.addEventListener('push', e => {
-  try {
-    const d = e.data ? e.data.json() : {};
-    e.waitUntil(self.registration.showNotification(d.title || '♠ The Table', {
-      body: d.body || '', icon: d.icon || '', badge: d.badge || '',
-      data: d.url ? {url: d.url} : {}
-    }));
-  } catch(err) {}
-});
-self.addEventListener('notificationclick', e => {
-  e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || self.location.origin;
-  e.waitUntil(clients.matchAll({type:'window'}).then(cs => {
-    for (const c of cs) { if (c.url === url && 'focus' in c) return c.focus(); }
-    if (clients.openWindow) return clients.openWindow(url);
-  }));
-});
-`;
-  const blob = new Blob([swCode], {type: 'application/javascript'});
-  const swUrl = URL.createObjectURL(blob);
-  return navigator.serviceWorker.register(swUrl, { scope: '/' })
-    .then(reg => { console.log('SW registered (inline)'); return reg; })
+  if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+  // sw.js is served as a real file alongside index.html on Vercel
+  return navigator.serviceWorker.register('./sw.js', { scope: './' })
+    .then(reg => { console.log('SW registered'); return reg; })
     .catch(e  => { console.warn('SW failed:', e); return null; });
 }
 
@@ -2922,7 +2877,8 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
       testBtn.textContent = 'Sending…'; testBtn.disabled = true;
       const statusEl = document.getElementById('testPushStatus');
       try {
-        const reg = await navigator.serviceWorker.ready;
+        const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) return null;
         const sub = await reg.pushManager.getSubscription();
         if (!sub) throw new Error('No subscription — try re-registering');
         const res = await fetchWithTimeout(WORKER_URL + '/push-test', {
