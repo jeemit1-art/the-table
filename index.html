@@ -816,7 +816,10 @@ function urlBase64ToUint8Array(base64String) {
 // ── Service Worker registration + inline SW ─────────────
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return Promise.resolve(null);
-  // sw.js is served as a real file alongside index.html on Vercel
+  // sw.js is a real file on Vercel — skip registration on other origins (e.g. previews)
+  const isVercel = location.hostname.endsWith('vercel.app') || location.hostname.endsWith('the-table.app');
+  const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (!isVercel && !isLocalhost) return Promise.resolve(null);
   return navigator.serviceWorker.register('./sw.js', { scope: './' })
     .then(reg => { console.log('SW registered'); return reg; })
     .catch(e  => { console.warn('SW failed:', e); return null; });
@@ -1093,7 +1096,14 @@ function renderGamesTab(body) {
         '<button class="home-cta" id="firstGameBtn" style="max-width:100%;padding:14px 20px;font-size:0.88rem">+ Create New Game</button>' +
       '</div>' +
       (cloudGroupId && !('Notification' in window && Notification.permission === 'granted') ?
-        '<button id="homeNotifBanner" style="width:100%;margin-bottom:16px;padding:14px;background:linear-gradient(135deg,rgba(201,168,76,0.12),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:12px;color:var(--gold);font-size:0.95rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">🔔 Enable Notifications</button>' : '') +
+        (('Notification' in window && Notification.permission === 'denied')
+          ? '<div id="homeNotifBanner" style="width:100%;margin-bottom:16px;padding:14px;background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.3);border-radius:12px;color:var(--gold);font-size:0.88rem;line-height:1.6">' +
+              '<div style="font-weight:700;margin-bottom:4px">⚠️ Notifications Blocked</div>' +
+              '<div style="color:var(--cream2)">Go to: <b>iPhone Settings → The Table → Notifications → Allow</b></div>' +
+              '<div style="color:var(--muted);font-size:0.8rem;margin-top:6px">After allowing, open the app from your Home Screen icon</div>' +
+            '</div>'
+          : '<button id="homeNotifBanner" style="width:100%;margin-bottom:16px;padding:14px;background:linear-gradient(135deg,rgba(201,168,76,0.12),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:12px;color:var(--gold);font-size:0.95rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">🔔 Enable Notifications</button>')
+        : '') +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">' +
         '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center">' +
           '<div style="font-size:1.6rem;font-weight:700;color:var(--gold)">' + playerCount + '</div>' +
@@ -2726,6 +2736,189 @@ async function showInstallScreen(groupId) {
   renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandaloneNow, hasPush, notifPerm);
 }
 
+function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandaloneNow, hasPush, notifPerm) {
+  const step3Done = !!(cloudMyName && localStorage.getItem('registeredGroup_' + groupId));
+  const notifGranted = notifPerm === 'granted';
+  const notifDenied  = notifPerm === 'denied';
+  const isStandalone = isStandaloneNow;
+
+  document.getElementById('liveInner').innerHTML = `
+    <div style="display:flex;flex-direction:column;min-height:100vh;padding:24px 20px 40px;max-width:480px;margin:0 auto">
+      <div style="text-align:center;margin-bottom:28px">
+        <div style="font-size:2.5rem;margin-bottom:10px">♠</div>
+        <div style="font-family:'Playfair Display',serif;font-size:1.4rem;font-weight:700;color:var(--cream)">${esc(groupName)}</div>
+        <div style="font-size:0.88rem;color:var(--muted);margin-top:5px">Enter your name so the host knows you're in</div>
+      </div>
+
+      ${step3Done ? `
+        <!-- Already registered -->
+        <div style="padding:20px;background:rgba(46,204,113,0.06);border:1px solid rgba(46,204,113,0.3);border-radius:14px;text-align:center;margin-bottom:20px">
+          <div style="font-size:1.5rem;margin-bottom:8px">✅</div>
+          <div style="font-size:1rem;font-weight:700;color:var(--green);margin-bottom:4px">You're in, ${esc(cloudMyName)}!</div>
+          <div style="font-size:0.88rem;color:var(--muted)">The host can see you're interested. You'll get notified when the game starts.</div>
+        </div>
+        <button id="reRegisterBtn" style="width:100%;padding:12px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:10px;font-size:0.88rem;cursor:pointer;margin-bottom:20px">
+          Use a different name
+        </button>
+      ` : `
+        <!-- Name entry -->
+        <div style="margin-bottom:20px">
+          <input id="installName" type="text" value="${esc(cloudMyName || '')}"
+            placeholder="Your name (e.g. Alex)"
+            style="width:100%;box-sizing:border-box;padding:14px;background:rgba(0,0,0,0.3);border:1px solid var(--border2);border-radius:10px;color:var(--cream);font-family:'DM Sans',sans-serif;font-size:1rem;margin-bottom:12px;outline:none">
+          <button id="installRegisterBtn" style="width:100%;padding:15px;background:linear-gradient(135deg,var(--gold),#8a5c20);color:#000;border:none;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:1rem;font-weight:700;cursor:pointer">
+            ✅ I'm In
+          </button>
+          <div id="installStatus" style="font-size:0.85rem;color:var(--muted);text-align:center;margin-top:8px;min-height:18px"></div>
+        </div>
+      `}
+
+      <!-- Notifications section -->
+      <div style="padding:16px;background:var(--bg2);border:1px solid ${notifGranted ? 'rgba(46,204,113,0.3)' : 'var(--border)'};border-radius:12px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:${notifGranted ? '0' : '12px'}">
+          <span style="font-size:1.2rem">${notifGranted ? '🔔' : '🔕'}</span>
+          <div>
+            <div style="font-size:0.9rem;font-weight:700;color:${notifGranted ? 'var(--green)' : 'var(--cream)'}">
+              ${notifGranted ? 'Notifications On ✓' : 'Enable Notifications'}
+            </div>
+            <div style="font-size:0.78rem;color:var(--muted)">
+              ${notifGranted ? "You'll be alerted when the game starts" : 'Optional — get alerted when a game is scheduled'}
+            </div>
+          </div>
+        </div>
+        ${notifGranted ? '' : (notifDenied
+          ? `<div style="font-size:0.85rem;color:var(--gold);line-height:1.7;padding:10px;background:rgba(201,168,76,0.08);border-radius:8px">
+               ⚠️ Notifications are blocked. To fix:<br>
+               <b>1.</b> Go to iPhone <b>Settings → scroll to The Table → Notifications → Allow</b><br>
+               <b>2.</b> Then open the app from your Home Screen icon
+             </div>`
+          : (!isStandalone
+            ? `<div style="font-size:0.85rem;color:var(--cream2);line-height:1.7;padding:10px;background:rgba(255,255,255,0.04);border-radius:8px">
+                 Open <b>The Table</b> from your <b>Home Screen icon</b> to enable notifications — iOS requires this.
+               </div>`
+            : `<button id="enableNotifBtn" style="width:100%;padding:12px;background:linear-gradient(135deg,#1e6b2a,#0f4a1a);color:#fff;border:none;border-radius:9px;font-family:'DM Sans',sans-serif;font-size:0.9rem;font-weight:700;cursor:pointer">
+                 🔔 Enable Notifications
+               </button>
+               <div id="notifBtnStatus" style="font-size:0.82rem;color:var(--muted);text-align:center;margin-top:6px;min-height:16px"></div>`)
+        )}
+      </div>
+
+      <!-- Install section (only if not standalone) -->
+      ${!isStandalone ? `
+        <div style="padding:14px 16px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;margin-bottom:16px">
+          <div style="font-size:0.85rem;font-weight:700;color:var(--cream);margin-bottom:8px">📲 Add to Home Screen <span style="font-size:0.75rem;color:var(--muted);font-weight:400">(optional)</span></div>
+          <div style="font-size:0.82rem;color:var(--cream2);line-height:1.8">
+            Tap <b style="color:var(--gold)">Share ⬆️</b> → <b style="color:var(--gold)">"Add to Home Screen"</b> → <b style="color:var(--gold)">Add</b>
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="text-align:center;margin-top:8px">
+        <a href="./" style="font-size:0.82rem;color:var(--muted);text-decoration:none">← Back to home</a>
+      </div>
+    </div>`;
+
+  // Wire name register button
+  const regBtn = document.getElementById('installRegisterBtn');
+  if (regBtn) {
+    regBtn.addEventListener('click', async () => {
+      const name = (document.getElementById('installName').value || '').trim();
+      const statusEl = document.getElementById('installStatus');
+      if (!name) { statusEl.textContent = 'Please enter your name'; return; }
+      regBtn.textContent = 'Saving…'; regBtn.disabled = true;
+      cloudMyName = name;
+      localStorage.setItem('cloudMyName', name);
+      try {
+        const swReg = await registerServiceWorker();
+        if (swReg) await new Promise(r => setTimeout(r, 600));
+        const sub = await subscribePushToGroup(name, null).catch(() => null);
+        localStorage.setItem('registeredGroup_' + groupId, name);
+        statusEl.textContent = '✓ Saved!';
+        await new Promise(r => setTimeout(r, 400));
+        const nowStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+        const nowPerm = ('Notification' in window) ? Notification.permission : 'denied';
+        renderInstallScreen(groupId, groupName, isIOS, isAndroid, nowStandalone, hasPush, nowPerm);
+      } catch(e) {
+        statusEl.textContent = '✗ Error: ' + e.message;
+        regBtn.textContent = 'Try Again'; regBtn.disabled = false;
+      }
+    });
+  }
+
+  // Wire re-register button
+  const reRegBtn = document.getElementById('reRegisterBtn');
+  if (reRegBtn) {
+    reRegBtn.addEventListener('click', () => {
+      localStorage.removeItem('registeredGroup_' + groupId);
+      const nowStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+      const nowPerm = ('Notification' in window) ? Notification.permission : 'denied';
+      renderInstallScreen(groupId, groupName, isIOS, isAndroid, nowStandalone, hasPush, nowPerm);
+    });
+  }
+
+  // Wire enable notifications button
+  const enableBtn = document.getElementById('enableNotifBtn');
+  if (enableBtn) {
+    enableBtn.addEventListener('click', async () => {
+      enableBtn.textContent = 'Requesting…'; enableBtn.disabled = true;
+      const statusEl = document.getElementById('notifBtnStatus');
+      try {
+        await registerServiceWorker();
+        const perm = await Promise.race([
+          Notification.requestPermission(),
+          new Promise(res => setTimeout(() => res('timeout'), 10000))
+        ]);
+        const nowStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+        if (perm === 'granted') {
+          if (cloudMyName && cloudGroupId) subscribePushToGroup(cloudMyName, null).catch(() => {});
+          renderInstallScreen(groupId, groupName, isIOS, isAndroid, nowStandalone, hasPush, 'granted');
+        } else if (perm === 'timeout') {
+          if (statusEl) statusEl.textContent = 'Timed out — try again';
+          enableBtn.textContent = '🔔 Enable Notifications'; enableBtn.disabled = false;
+        } else {
+          renderInstallScreen(groupId, groupName, isIOS, isAndroid, nowStandalone, hasPush, perm);
+        }
+      } catch(e) {
+        if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+        enableBtn.textContent = '🔔 Enable Notifications'; enableBtn.disabled = false;
+      }
+    });
+  }
+}
+
+
+async function showInstallScreen(groupId) {
+  // Store the group ID so push subscriptions work
+  if (groupId && !cloudGroupId) {
+    cloudGroupId = groupId;
+    localStorage.setItem('cloudGroupId', groupId);
+  }
+
+  const isIOS     = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isAndroid = /android/i.test(navigator.userAgent);
+  // iOS 16.4+ supports push only when running as installed PWA (standalone)
+  const isStandaloneNow = window.navigator.standalone === true
+    || window.matchMedia('(display-mode: standalone)').matches;
+  const hasPush = 'PushManager' in window && 'serviceWorker' in navigator;
+  const notifPerm = 'Notification' in window ? Notification.permission : 'unsupported';
+
+  showScreen('liveScreen');
+
+  // Fetch group name to personalise screen
+  let groupName = 'The Table';
+  try {
+    const grp = await apiGetGroup(groupId);
+    if (grp.groupName) groupName = grp.groupName;
+    if (cloudMyName && grp.subscribers && grp.subscribers[cloudMyName.toLowerCase()]) {
+      // Already registered — show status screen instead
+      showAlreadyRegistered(groupId, groupName, grp);
+      return;
+    }
+  } catch(e) {}
+
+  renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandaloneNow, hasPush, notifPerm);
+}
+
 function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone, hasPush, notifPerm) {
   const alreadyInstalled = isStandalone;
   const step1Done = alreadyInstalled;
@@ -2741,7 +2934,7 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
            1. Tap the <b style="color:var(--gold)">Share ⬆️</b> button at the bottom of Safari<br>
            2. Tap <b style="color:var(--gold)">"Add to Home Screen"</b><br>
            3. Tap <b style="color:var(--gold)">"Add"</b><br>
-           4. Open ♠ The Table from your home screen, then re-open this link
+           4. Open ♠ The Table from your <b>Home Screen icon</b> — notifications can only be enabled from there
          </div>`
       : `<div style="font-size:0.88rem;color:var(--gold);line-height:1.7;margin:10px 0;padding:10px;background:rgba(201,168,76,0.08);border-radius:8px">
            ⚠️ You must use <b>Safari</b> to install on iPhone.<br>Copy this link and open it in Safari.
@@ -2789,7 +2982,9 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
         ${step2Done ? '' : (notifPerm === 'denied'
           ? `<div style="font-size:0.88rem;color:var(--gold);line-height:1.7;padding:8px;background:rgba(201,168,76,0.08);border-radius:8px">
                ⚠️ Notifications are blocked.<br>
-               ${isIOS ? 'Go to: Settings → The Table → Notifications → Allow' : 'Go to: Settings → App Notifications → Allow'}
+               ${isIOS
+                 ? 'Go to: iPhone Settings → Scroll down to The Table → Notifications → Allow Notifications. Then open The Table from your Home Screen icon.'
+                 : 'Go to: Settings → App Notifications → Allow'}
              </div>`
           : `<button id="enableNotifBtn" style="width:100%;padding:12px;background:linear-gradient(135deg,#1e6b2a,#0f4a1a);color:#fff;border:none;border-radius:9px;font-family:DM Sans,sans-serif;font-size:0.84rem;font-weight:700;cursor:pointer">🔔 Enable Notifications</button>
              <div id="notifBtnStatus" style="font-size:0.85rem;color:var(--muted);text-align:center;margin-top:6px;min-height:16px"></div>`
