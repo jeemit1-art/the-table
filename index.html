@@ -643,7 +643,8 @@ const VAPID_PUBLIC  = 'BOjy7FRAI9dZ4ijq0X30ERbwRqpdiSiwD-Sm2AsfZl_hwpXy0b2omZ94_
 let cloudRole      = localStorage.getItem('cloudRole')      || null;
 let cloudGameCode  = localStorage.getItem('cloudGameCode')  || null;
 let cloudMyName    = localStorage.getItem('cloudMyName')    || null;
-let cloudGroupId   = localStorage.getItem('cloudGroupId')   || null;  // permanent group ID
+let cloudGroupId   = localStorage.getItem('cloudGroupId')   || null;
+  if (cloudGroupId) syncStatsFromCloud();  // permanent group ID
 let cloudGroupName = localStorage.getItem('cloudGroupName') || null;
 let pushSub        = null;  // current push subscription object
 let isReadOnly     = false; // true when viewing as player (no editing)
@@ -765,6 +766,33 @@ async function apiGroupNotify(groupId, title, body, target) {
     body: JSON.stringify({ title, body: body || '', target: target || 'all' }),
   }).catch(() => {});
 }
+// ── Cloud Stats & History API ──────────────────────────
+async function apiGetGroupStats(groupId) {
+  const r = await fetchWithTimeout(WORKER_URL + '/group/' + groupId + '/stats');
+  if (!r.ok) return {};
+  return r.json();
+}
+async function apiSetGroupStats(groupId, stats) {
+  await fetchWithTimeout(WORKER_URL + '/group/' + groupId + '/stats', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(stats),
+  }).catch(() => {});
+}
+async function apiGetGroupHistory(groupId) {
+  const r = await fetchWithTimeout(WORKER_URL + '/group/' + groupId + '/history');
+  if (!r.ok) return [];
+  return r.json();
+}
+async function apiSetGroupHistory(groupId, history) {
+  await fetchWithTimeout(WORKER_URL + '/group/' + groupId + '/history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(history),
+  }).catch(() => {});
+}
+
+
 
 // ── Push subscription ────────────────────────────────────
 async function subscribePush(playerName, gameCode) {
@@ -979,7 +1007,11 @@ function saveState() {
 function getStats() {
   try { return JSON.parse(localStorage.getItem(STATS_K) || '{}'); } catch(e) { return {}; }
 }
-function saveStats(s) { localStorage.setItem(STATS_K, JSON.stringify(s)); }
+function saveStats(s) {
+  localStorage.setItem(STATS_K, JSON.stringify(s));
+  // Also push to cloud if we have a group
+  if (cloudGroupId) apiSetGroupStats(cloudGroupId, s).catch(() => {});
+}
 function getHistory() {
   try { return JSON.parse(localStorage.getItem(HIST_K) || '[]'); } catch(e) { return []; }
 }
@@ -1060,6 +1092,26 @@ function showScreen(id) {
 // ════════════════════════════════════════════════════════
 let currentTab = 'games';
 
+
+// Sync stats & history from cloud into localStorage (so all devices stay current)
+async function syncStatsFromCloud() {
+  if (!cloudGroupId) return;
+  try {
+    const [cloudStats, cloudHistory] = await Promise.all([
+      apiGetGroupStats(cloudGroupId),
+      apiGetGroupHistory(cloudGroupId),
+    ]);
+    if (cloudStats && Object.keys(cloudStats).length > 0) {
+      localStorage.setItem(STATS_K, JSON.stringify(cloudStats));
+    }
+    if (cloudHistory && cloudHistory.length > 0) {
+      localStorage.setItem('pokerGameHistory', JSON.stringify(cloudHistory));
+    }
+  } catch(e) {
+    console.warn('Could not sync stats from cloud:', e);
+  }
+}
+
 function renderHome() {
   showScreen('homeScreen');
   renderTab();
@@ -1071,7 +1123,12 @@ function switchTab(tab) {
     const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
     if (btn) btn.classList.toggle('active', t === tab);
   });
-  renderTab();
+  // Pull fresh stats from cloud before rendering leaderboard/history
+  if (tab !== 'games' && cloudGroupId) {
+    syncStatsFromCloud().then(() => renderTab());
+  } else {
+    renderTab();
+  }
 }
 
 function renderTab() {
@@ -1309,23 +1366,30 @@ function renderHistoryTab(body) {
 function getGameHistory() {
   try { return JSON.parse(localStorage.getItem('pokerGameHistory') || '[]'); } catch(e) { return []; }
 }
-function saveGameHistory(h) { localStorage.setItem('pokerGameHistory', JSON.stringify(h)); }
+function saveGameHistory(h) {
+  localStorage.setItem('pokerGameHistory', JSON.stringify(h));
+  // Also push to cloud if we have a group
+  if (cloudGroupId) apiSetGroupHistory(cloudGroupId, h).catch(() => {});
+}
 
-function recordGameHistory() {
+function recordGameHistory(gameId) {
   if (!state.game) return;
   const players = Object.values(state.players)
     .filter(p => p && p.name && pBuyin(p) > 0)
     .map(p => ({ name: p.name, net: pNet(p) }))
     .sort((a, b) => b.net - a.net);
   if (!players.length) return;
+  const hist = getGameHistory();
+  // Remove any existing entry for this gameId before adding (idempotent)
+  const filtered = gameId ? hist.filter(h => h.gameId !== gameId) : hist;
   const entry = {
+    gameId,
     date: state.game.gameDate || state.game.startedAt || Date.now(),
     name: state.game.name || 'Poker Night',
     players
   };
-  const hist = getGameHistory();
-  hist.push(entry);
-  saveGameHistory(hist.slice(-52)); // keep last 52 games (1 year of weekly games)
+  filtered.push(entry);
+  saveGameHistory(filtered.slice(-52)); // keep last 52 games (1 year of weekly games)
 }
 
 // ── Auto-schedule: notify group every Wednesday for Friday game ───────────
@@ -1727,6 +1791,34 @@ function endGame() {
   noBtn.textContent = 'Cancel';
   yesBtn.addEventListener('click', async () => {
     overlay.remove();
+    // Check if already settled
+    const gameId = state.game && (state.game.code || state.game.startedAt || state.game.name);
+    const alreadySettled = gameId && localStorage.getItem('settled_' + gameId);
+    if (alreadySettled) {
+      // Show already-settled dialog
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;inset:0;z-index:700;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;padding:24px';
+      d.innerHTML = '<div style="background:#0d1f10;border:1px solid var(--border2);border-radius:16px;padding:24px;width:100%;max-width:320px">' +
+        '<div style="font-size:1rem;font-weight:700;color:var(--gold);margin-bottom:10px">Already Settled</div>' +
+        '<div style="font-size:0.88rem;color:var(--cream2);margin-bottom:20px;line-height:1.6">This game has already been settled and saved to the leaderboard.</div>' +
+        '<button id="unsettleBtn" style="width:100%;padding:12px;background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:10px;font-size:0.88rem;font-weight:700;cursor:pointer;margin-bottom:8px">Unsettle &amp; Redo</button>' +
+        '<button id="settleCancelBtn" style="width:100%;padding:12px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:10px;font-size:0.88rem;cursor:pointer">Cancel</button>' +
+        '</div>';
+      document.body.appendChild(d);
+      document.getElementById('settleCancelBtn').onclick = () => d.remove();
+      document.getElementById('unsettleBtn').onclick = () => {
+        // Remove settled flag and undo stats
+        localStorage.removeItem('settled_' + gameId);
+        // Remove from game history
+        const hist = getGameHistory().filter(h => h.gameId !== gameId);
+        saveGameHistory(hist);
+        // Rebuild stats from scratch from remaining history
+        rebuildStatsFromHistory();
+        d.remove();
+        toast('Unsettled — you can now end the game again');
+      };
+      return;
+    }
     recordStats();
     // Push a "game ended" flag to cloud BEFORE clearing state, so players detect it
     if (cloudRole === 'host' && cloudGameCode && cloudGameCode !== 'LOCAL') {
@@ -1749,8 +1841,32 @@ function endGame() {
   document.body.appendChild(overlay);
 }
 
+
+function rebuildStatsFromHistory() {
+  const hist = getGameHistory();
+  const stats = {};
+  hist.forEach(game => {
+    (game.players || []).forEach(p => {
+      const k = p.name.toLowerCase();
+      if (!stats[k]) stats[k] = { name: p.name, games: 0, net: 0, lastSeen: 0 };
+      stats[k].games++;
+      stats[k].net += p.net;
+      stats[k].lastSeen = Date.now();
+      stats[k].name = p.name;
+    });
+  });
+  saveStats(stats);
+}
+
 function recordStats() {
   if (!state.game) return;
+  // Use gameId to make settlement idempotent — can't record same game twice
+  const gameId = state.game.code || state.game.startedAt || state.game.name;
+  const settledKey = 'settled_' + gameId;
+  if (localStorage.getItem(settledKey)) {
+    console.log('Game already settled — skipping duplicate recordStats');
+    return;
+  }
   const stats = getStats();
   Object.values(state.players).filter(p => p && p.name && pBuyin(p) > 0).forEach(p => {
     const k = p.name.toLowerCase();
@@ -1761,7 +1877,8 @@ function recordStats() {
     stats[k].name = p.name;
   });
   saveStats(stats);
-  recordGameHistory(); // also save per-game history
+  recordGameHistory(gameId);
+  localStorage.setItem(settledKey, Date.now()); // mark as settled
 }
 
 // ════════════════════════════════════════════════════════
