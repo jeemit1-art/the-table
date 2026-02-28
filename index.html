@@ -1092,6 +1092,8 @@ function renderGamesTab(body) {
         '<div style="font-size:0.88rem;color:var(--muted);line-height:1.6;margin-bottom:18px">Track buy-ins, cashouts &amp; settlements for your Friday night poker</div>' +
         '<button class="home-cta" id="firstGameBtn" style="max-width:100%;padding:14px 20px;font-size:0.88rem">+ Create New Game</button>' +
       '</div>' +
+      (cloudGroupId && !('Notification' in window && Notification.permission === 'granted') ?
+        '<button id="homeNotifBanner" style="width:100%;margin-bottom:16px;padding:14px;background:linear-gradient(135deg,rgba(201,168,76,0.12),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:12px;color:var(--gold);font-size:0.95rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">🔔 Enable Notifications</button>' : '') +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">' +
         '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center">' +
           '<div style="font-size:1.6rem;font-weight:700;color:var(--gold)">' + playerCount + '</div>' +
@@ -1131,6 +1133,43 @@ function renderGamesTab(body) {
       '</div>' +
       '</div>';
     document.getElementById('firstGameBtn').addEventListener('click', openNewGame);
+
+    // Notification enable button — shown when player has group but notifications not granted
+    const notifGranted = 'Notification' in window && Notification.permission === 'granted';
+    const notifBanner = document.getElementById('homeNotifBanner');
+    if (notifBanner) {
+      // Hide if already granted
+      if (notifGranted) {
+        notifBanner.style.display = 'none';
+      } else {
+        notifBanner.addEventListener('click', async () => {
+          const isStandalone = window.navigator.standalone === true
+            || window.matchMedia('(display-mode: standalone)').matches;
+          if (!isStandalone) {
+            toast('Open from your Home Screen icon first, then tap this button');
+            return;
+          }
+          notifBanner.textContent = 'Requesting…';
+          notifBanner.disabled = true;
+          try {
+            await registerServiceWorker();
+            const perm = await Notification.requestPermission();
+            if (perm === 'granted') {
+              notifBanner.style.display = 'none';
+              toast('✓ Notifications enabled!');
+              if (cloudGroupId) subscribePushToGroup(cloudMyName || 'Player', null).catch(() => {});
+            } else {
+              notifBanner.textContent = '🔔 Enable Notifications';
+              notifBanner.disabled = false;
+              toast('Notifications denied — check your iPhone Settings');
+            }
+          } catch(e) {
+            notifBanner.textContent = '🔔 Enable Notifications';
+            notifBanner.disabled = false;
+          }
+        });
+      }
+    }
     return;
   }
   const g = state.game;
@@ -2667,9 +2706,7 @@ async function showInstallScreen(groupId) {
   // iOS 16.4+ supports push only when running as installed PWA (standalone)
   const isStandaloneNow = window.navigator.standalone === true
     || window.matchMedia('(display-mode: standalone)').matches;
-  const iosVersion = isIOS ? parseInt((navigator.userAgent.match(/OS (\d+)_/) || [0,0])[1]) : 99;
-  const iosPushSupported = !isIOS || (iosVersion >= 16 && isStandaloneNow);
-  const hasPush   = 'PushManager' in window && 'serviceWorker' in navigator && iosPushSupported;
+  const hasPush = 'PushManager' in window && 'serviceWorker' in navigator;
   const notifPerm = 'Notification' in window ? Notification.permission : 'unsupported';
 
   showScreen('liveScreen');
@@ -2754,12 +2791,8 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
                ⚠️ Notifications are blocked.<br>
                ${isIOS ? 'Go to: Settings → The Table → Notifications → Allow' : 'Go to: Settings → App Notifications → Allow'}
              </div>`
-          : (!hasPush && isIOS && !isStandalone
-            ? `<div style="font-size:0.88rem;color:var(--gold);line-height:1.7;padding:10px;background:rgba(201,168,76,0.08);border-radius:8px">
-                 ⚠️ Open the app from your <b>Home Screen</b> first, then tap this link again to enable notifications.
-               </div>`
-            : `<button id="enableNotifBtn" style="width:100%;padding:12px;background:linear-gradient(135deg,#1e6b2a,#0f4a1a);color:#fff;border:none;border-radius:9px;font-family:DM Sans,sans-serif;font-size:0.84rem;font-weight:700;cursor:pointer">🔔 Enable Notifications</button>
-               <div id="notifBtnStatus" style="font-size:0.85rem;color:var(--muted);text-align:center;margin-top:6px;min-height:16px"></div>`)
+          : `<button id="enableNotifBtn" style="width:100%;padding:12px;background:linear-gradient(135deg,#1e6b2a,#0f4a1a);color:#fff;border:none;border-radius:9px;font-family:DM Sans,sans-serif;font-size:0.84rem;font-weight:700;cursor:pointer">🔔 Enable Notifications</button>
+             <div id="notifBtnStatus" style="font-size:0.85rem;color:var(--muted);text-align:center;margin-top:6px;min-height:16px"></div>`
         )}
       </div>
 
@@ -2806,6 +2839,13 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
     enableBtn.addEventListener('click', async () => {
       enableBtn.textContent = 'Requesting…'; enableBtn.disabled = true;
       const statusEl = document.getElementById('notifBtnStatus');
+      const nowStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+      // iOS requires standalone for push notifications
+      if (isIOS && !nowStandalone) {
+        enableBtn.textContent = '🔔 Enable Notifications'; enableBtn.disabled = false;
+        if (statusEl) statusEl.innerHTML = '⚠️ Open <b>The Table</b> from your Home Screen icon first, then tap the invite link again inside the app.';
+        return;
+      }
       try {
         await registerServiceWorker();
         const perm = await Promise.race([
@@ -2813,7 +2853,6 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
           new Promise(res => setTimeout(() => res('timeout'), 10000))
         ]);
         if (perm === 'granted') {
-          const nowStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
           renderInstallScreen(groupId, groupName, isIOS, isAndroid, nowStandalone, hasPush, 'granted');
         } else if (perm === 'timeout') {
           if (statusEl) statusEl.textContent = 'Timed out — please try again';
@@ -2838,10 +2877,7 @@ function renderInstallScreen(groupId, groupName, isIOS, isAndroid, isStandalone,
       if (!name) { statusEl.textContent = 'Please enter your name'; return; }
       // Re-read permission live — it may have been granted since render
       const currentPerm = ('Notification' in window) ? Notification.permission : 'denied';
-      if (currentPerm !== 'granted') {
-        // Still allow registration — just won't receive push notifications
-        statusEl.textContent = 'Tip: Enable notifications for game alerts';
-      }
+      // Proceed regardless — push subscription will be skipped if permission not granted
       regBtn.textContent = 'Registering…'; regBtn.disabled = true;
       statusEl.textContent = 'Setting up service worker…';
       try {
