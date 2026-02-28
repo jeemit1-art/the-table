@@ -791,6 +791,25 @@ async function apiSetGroupHistory(groupId, history) {
     body: JSON.stringify(history),
   }).catch(() => {});
 }
+async function apiGetGroupGames(groupId) {
+  const r = await fetchWithTimeout(WORKER_URL + '/group/' + groupId + '/games');
+  if (!r.ok) return [];
+  return r.json();
+}
+async function apiGroupAddGame(groupId, gameCode) {
+  await fetchWithTimeout(WORKER_URL + '/group/' + groupId + '/games/add', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gameCode }),
+  }).catch(() => {});
+}
+async function apiGroupEndGame(groupId, gameCode) {
+  await fetchWithTimeout(WORKER_URL + '/group/' + groupId + '/games/end', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gameCode }),
+  }).catch(() => {});
+}
+
+
 
 
 
@@ -1112,6 +1131,17 @@ async function syncStatsFromCloud() {
   }
 }
 
+
+// Fetch all active/scheduled games from cloud for this group
+async function syncCloudGames() {
+  if (!cloudGroupId) return [];
+  try {
+    return await apiGetGroupGames(cloudGroupId);
+  } catch(e) {
+    return [];
+  }
+}
+
 function renderHome() {
   showScreen('homeScreen');
   renderTab();
@@ -1139,175 +1169,172 @@ function renderTab() {
 }
 
 function renderGamesTab(body) {
-  if (!state.game) {
-    const stats = getStats();
-    const playerCount = Object.keys(stats).length;
-    const hist = getGameHistory();
-    const totalGames = hist.length;
-    body.innerHTML =
-      '<div style="padding:20px 16px 0">' +
-      '<div style="background:linear-gradient(135deg,#0d2010,#132a14);border:1px solid rgba(201,168,76,0.2);border-radius:16px;padding:20px;margin-bottom:16px;text-align:center">' +
-        '<div style="font-size:2rem;margin-bottom:8px">♠</div>' +
-        '<div style="font-size:1.1rem;font-weight:700;color:var(--cream);margin-bottom:6px">The Table</div>' +
-        '<div style="font-size:0.88rem;color:var(--muted);line-height:1.6;margin-bottom:18px">Track buy-ins, cashouts &amp; settlements for your Friday night poker</div>' +
-        '<button class="home-cta" id="firstGameBtn" style="max-width:100%;padding:14px 20px;font-size:0.88rem">+ Create New Game</button>' +
-      '</div>' +
-      (cloudGroupId && !('Notification' in window && Notification.permission === 'granted') ?
-        (('Notification' in window && Notification.permission === 'denied')
-          ? '<div id="homeNotifBanner" style="width:100%;margin-bottom:16px;padding:14px;background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.3);border-radius:12px;color:var(--gold);font-size:0.88rem;line-height:1.6">' +
-              '<div style="font-weight:700;margin-bottom:4px">⚠️ Notifications Blocked</div>' +
-              '<div style="color:var(--cream2)">Go to: <b>iPhone Settings → The Table → Notifications → Allow</b></div>' +
-              '<div style="color:var(--muted);font-size:0.8rem;margin-top:6px">After allowing, open the app from your Home Screen icon</div>' +
-            '</div>'
-          : '<button id="homeNotifBanner" style="width:100%;margin-bottom:16px;padding:14px;background:linear-gradient(135deg,rgba(201,168,76,0.12),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:12px;color:var(--gold);font-size:0.95rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">🔔 Enable Notifications</button>')
-        : '') +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">' +
-        '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center">' +
-          '<div style="font-size:1.6rem;font-weight:700;color:var(--gold)">' + playerCount + '</div>' +
-          '<div style="font-size:0.8rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-top:3px">Players Tracked</div>' +
-        '</div>' +
-        '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center">' +
-          '<div style="font-size:1.6rem;font-weight:700;color:var(--gold)">' + totalGames + '</div>' +
-          '<div style="font-size:0.8rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-top:3px">Games Played</div>' +
-        '</div>' +
-      '</div>' +
-      '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px">' +
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--border)">' +
-          '<div style="font-size:0.9rem;text-transform:uppercase;letter-spacing:2px;color:var(--gold-dim)">What You Can Do</div>' +
-        '</div>' +
-        '<div style="padding:4px 0">' +
-          '<div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid rgba(201,168,76,0.06)">' +
-            '<span style="font-size:1.1rem">🃏</span>' +
-            '<div><div style="font-size:0.9rem;color:var(--cream);font-weight:600">Create &amp; Manage Games</div><div style="font-size:0.82rem;color:var(--muted);margin-top:1px">Live buy-ins and cashouts at the table</div></div>' +
-          '</div>' +
-          '<div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid rgba(201,168,76,0.06)">' +
-            '<span style="font-size:1.1rem">📲</span>' +
-            '<div><div style="font-size:0.9rem;color:var(--cream);font-weight:600">RSVP &amp; Invite Players</div><div style="font-size:0.82rem;color:var(--muted);margin-top:1px">Send invite links so players can RSVP before the game</div></div>' +
-          '</div>' +
-          '<div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid rgba(201,168,76,0.06)">' +
-            '<span style="font-size:1.1rem">💸</span>' +
-            '<div><div style="font-size:0.9rem;color:var(--cream);font-weight:600">Auto Settle Up</div><div style="font-size:0.82rem;color:var(--muted);margin-top:1px">Calculates the minimum transfers to square everyone</div></div>' +
-          '</div>' +
-          '<div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid rgba(201,168,76,0.06)">' +
-            '<span style="font-size:1.1rem">💬</span>' +
-            '<div><div style="font-size:0.9rem;color:var(--cream);font-weight:600">WhatsApp Integration</div><div style="font-size:0.82rem;color:var(--muted);margin-top:1px">Send results &amp; settlements to your group chat</div></div>' +
-          '</div>' +
-          '<div style="display:flex;align-items:center;gap:12px;padding:11px 14px">' +
-            '<span style="font-size:1.1rem">🏆</span>' +
-            '<div><div style="font-size:0.9rem;color:var(--cream);font-weight:600">All-Time Leaderboard</div><div style="font-size:0.82rem;color:var(--muted);margin-top:1px">Track who\'s up and who owes across every game</div></div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      '</div>';
-    document.getElementById('firstGameBtn').addEventListener('click', openNewGame);
-
-    // Notification enable button — shown when player has group but notifications not granted
-    const notifGranted = 'Notification' in window && Notification.permission === 'granted';
-    const notifBanner = document.getElementById('homeNotifBanner');
-    if (notifBanner) {
-      // Hide if already granted
-      if (notifGranted) {
-        notifBanner.style.display = 'none';
-      } else {
-        notifBanner.addEventListener('click', async () => {
-          const isStandalone = window.navigator.standalone === true
-            || window.matchMedia('(display-mode: standalone)').matches;
-          if (!isStandalone) {
-            toast('Open from your Home Screen icon first, then tap this button');
-            return;
-          }
-          notifBanner.textContent = 'Requesting…';
-          notifBanner.disabled = true;
-          try {
-            await registerServiceWorker();
-            const perm = await Notification.requestPermission();
-            if (perm === 'granted') {
-              notifBanner.style.display = 'none';
-              toast('✓ Notifications enabled!');
-              if (cloudGroupId) subscribePushToGroup(cloudMyName || 'Player', null).catch(() => {});
-            } else {
-              notifBanner.textContent = '🔔 Enable Notifications';
-              notifBanner.disabled = false;
-              toast('Notifications denied — check your iPhone Settings');
-            }
-          } catch(e) {
-            notifBanner.textContent = '🔔 Enable Notifications';
-            notifBanner.disabled = false;
-          }
-        });
-      }
-    }
+  // If currently in a game, show game view (existing behaviour)
+  if (state.game) {
+    _renderGamesTabWithGame(body);
     return;
   }
-  const g = state.game;
-  const players = Object.values(state.players).filter(p => p && p.name);
-  const dateStr = g.gameDate
-    ? new Date(g.gameDate).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
-    : new Date(g.startedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
-  const isLobby = !!(g.lobbyActive);
-  const rsvpPlayers = Object.entries(state.players)
-    .filter(([, p]) => p && p.name && p.rsvp)
-    .map(([sid, p]) => ({ sid, name: p.name }));
-  const rsvpCount = rsvpPlayers.length;
 
-  // Build RSVP list HTML for lobby mode
-  let rsvpListHtml = '';
-  if (isLobby) {
-    if (rsvpCount === 0) {
-      rsvpListHtml = `<div style="font-size:0.85rem;color:var(--muted);padding:10px 0;text-align:center">No seats claimed yet — send the invite!</div>`;
-    } else {
-      rsvpListHtml = rsvpPlayers.map(({ sid, name }) => {
-        const seatNum = sid.replace('seat', '');
-        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(201,168,76,0.08)">
-          <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#1e6b2a,#0f4a1a);display:flex;align-items:center;justify-content:center;font-size:0.9rem;font-weight:700;color:var(--cream);flex-shrink:0">${esc(inits(name))}</div>
-          <div style="flex:1;font-size:0.9rem;color:var(--cream)">${esc(name)}</div>
-          <div style="font-size:0.8rem;color:var(--gold)">Seat ${seatNum}</div>
-        </div>`;
-      }).join('');
+  // Show loading state instantly, then populate with cloud games
+  const stats   = getStats();
+  const hist    = getGameHistory();
+  const playerCount = Object.keys(stats).length;
+  const totalGames  = hist.length;
+
+  const notifGranted = 'Notification' in window && Notification.permission === 'granted';
+
+  body.innerHTML =
+    '<div style="padding:20px 16px 0">' +
+    // Stats row
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">' +
+      '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center">' +
+        '<div style="font-size:1.6rem;font-weight:700;color:var(--gold)">' + playerCount + '</div>' +
+        '<div style="font-size:0.8rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-top:3px">Players Tracked</div>' +
+      '</div>' +
+      '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center">' +
+        '<div style="font-size:1.6rem;font-weight:700;color:var(--gold)">' + totalGames + '</div>' +
+        '<div style="font-size:0.8rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-top:3px">Games Played</div>' +
+      '</div>' +
+    '</div>' +
+    // Notification banner
+    (cloudGroupId && !notifGranted ?
+      ('<div id="homeNotifBanner" style="width:100%;margin-bottom:14px;padding:13px 16px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.3);border-radius:12px;' +
+       'color:var(--gold);font-size:0.9rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px">' +
+       '<span>🔔</span><span>' +
+       (('Notification' in window && Notification.permission === 'denied')
+         ? '⚠️ Notifications blocked — tap for instructions'
+         : 'Enable Notifications') +
+       '</span></div>') : '') +
+    // Scheduled games section
+    '<div id="cloudGamesList"><div style="padding:20px;text-align:center;color:var(--muted);font-size:0.88rem">Loading games…</div></div>' +
+    // New game button
+    '<button class="home-cta" id="firstGameBtn" style="width:100%;margin-bottom:20px;padding:14px 20px;font-size:0.9rem">+ Schedule New Game</button>' +
+    '</div>';
+
+  document.getElementById('firstGameBtn').addEventListener('click', openNewGame);
+
+  // Wire notification banner
+  const notifBanner = document.getElementById('homeNotifBanner');
+  if (notifBanner) {
+    notifBanner.addEventListener('click', async () => {
+      const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+      if ('Notification' in window && Notification.permission === 'denied') {
+        toast('Go to iPhone Settings → The Table → Notifications → Allow');
+        return;
+      }
+      if (!isStandalone) { toast('Open from your Home Screen icon first'); return; }
+      try {
+        await registerServiceWorker();
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          notifBanner.style.display = 'none';
+          toast('✓ Notifications enabled!');
+          if (cloudGroupId && cloudMyName) subscribePushToGroup(cloudMyName, null).catch(() => {});
+        }
+      } catch(e) {}
+    });
+  }
+
+  // Load cloud games async
+  syncCloudGames().then(cloudGames => {
+    const container = document.getElementById('cloudGamesList');
+    if (!container) return;
+
+    if (!cloudGames || cloudGames.length === 0) {
+      container.innerHTML =
+        '<div style="background:linear-gradient(135deg,#0d2010,#132a14);border:1px solid rgba(201,168,76,0.15);border-radius:14px;padding:28px 20px;text-align:center;margin-bottom:14px">' +
+          '<div style="font-size:2.2rem;margin-bottom:10px">♠</div>' +
+          '<div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--cream);margin-bottom:6px">The Table</div>' +
+          '<div style="font-size:0.88rem;color:var(--muted);line-height:1.6">No games scheduled yet.<br>Tap below to create your first game.</div>' +
+        '</div>';
+      return;
     }
-  }
 
-  body.innerHTML = `
-    <div class="section-title">Active Games <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(201,168,76,0.15);color:var(--muted);font-size:0.82rem;margin-left:6px">1</span></div>
-    <div class="game-cards">
-      <div class="game-card" id="gameCardBtn">
-        <div class="game-card-icon">${isLobby ? '⏳' : '▶'}</div>
-        <div class="game-card-body">
-          <div class="game-card-name">${esc(g.name)}</div>
-          <div class="game-card-meta">👥 ${isLobby ? rsvpCount + ' RSVP\'d' : players.length + ' players'} &nbsp;·&nbsp; 📅 ${esc(dateStr)}${g.location ? ' &nbsp;·&nbsp; 📍 ' + esc(g.location) : ''}</div>
-        </div>
-        <span class="game-card-live" style="${isLobby ? 'background:rgba(201,168,76,0.15);color:var(--gold);border-color:rgba(201,168,76,0.4)' : ''}">${isLobby ? 'LOBBY' : 'LIVE'}</span>
-      </div>
-    </div>
-    ${isLobby ? `
-    <div style="margin:0 14px 14px;background:var(--bg2);border:1px solid rgba(201,168,76,0.2);border-radius:12px;padding:12px 14px">
-      <div style="font-size:0.9rem;text-transform:uppercase;letter-spacing:2px;color:var(--gold-dim);margin-bottom:8px">RSVP'd Players</div>
-      ${rsvpListHtml}
-    </div>` : ''}
-    <div style="display:flex;gap:8px;padding:0 14px;margin-bottom:14px;align-items:center">
-      <button class="continue-btn" id="continueBtn" style="margin:0;flex:1">${isLobby ? '⏳ Open Lobby' : '▶ Continue Game'}</button>
-    </div>
-    ${state.game && state.game.code && state.game.code !== 'LOCAL' ? '<div style=\"text-align:center;font-size:0.9rem;color:var(--muted);padding-bottom:12px;letter-spacing:1px\">Share code: <span style=\"color:var(--gold);font-weight:700;letter-spacing:3px\">' + state.game.code + '</span></div>' : ''}
-  `;
-  document.getElementById('gameCardBtn').addEventListener('click', () => {
-    if (isLobby) {
-      const inviteLink = buildGroupLink('rsvp');
-      openLobby(g.name, g.stakes, g.gameDate, g.location, g.seats, inviteLink, cloudGameCode);
-    } else { openGameWithPasswordCheck(); }
-  });
-  document.getElementById('continueBtn').addEventListener('click', () => {
-    if (isLobby) {
-      const inviteLink = buildGroupLink('rsvp');
-      openLobby(g.name, g.stakes, g.gameDate, g.location, g.seats, inviteLink, cloudGameCode);
-    } else { openGameWithPasswordCheck(); }
-  });
+    // Sort: active/lobby first, then by date
+    const active  = cloudGames.filter(g => !g.ended).sort((a, b) => (a.gameDate || 0) - (b.gameDate || 0));
+    const ended   = cloudGames.filter(g => g.ended);
 
-  // If in lobby mode and not already polling, do an immediate fetch so RSVP list is current
-  if (isLobby && !lobbyPollInterval && cloudGameCode && cloudGameCode !== 'LOCAL') {
-    refreshLobbySeats(); // immediate fetch
-    lobbyPollInterval = setInterval(refreshLobbySeats, 2000); // keep updating
-  }
+    let html = '';
+
+    if (active.length > 0) {
+      html += '<div style="font-family:var(--display);font-size:1rem;font-weight:600;color:var(--cream);padding:4px 2px 10px">Scheduled Games</div>';
+      active.forEach(g => {
+        const dateStr = g.gameDate
+          ? new Date(g.gameDate).toLocaleDateString(undefined, { weekday:'short', day:'numeric', month:'short' }) +
+            ' · ' + new Date(g.gameDate).toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' })
+          : 'Date TBC';
+        const isLobby = g.lobbyActive && !g.ended;
+        html +=
+          '<div class="game-card" data-code="' + g.code + '" style="margin-bottom:10px;position:relative">' +
+            '<div class="game-card-icon">🃏</div>' +
+            '<div class="game-card-body">' +
+              '<div class="game-card-name">' + esc(g.name) + '</div>' +
+              '<div class="game-card-meta">' + esc(dateStr) +
+                (g.stakes ? ' · ' + esc(g.stakes) : '') +
+                (g.location ? ' · ' + esc(g.location) : '') +
+              '</div>' +
+            '</div>' +
+            (isLobby
+              ? '<span class="game-card-live">OPEN</span>'
+              : '<span style="font-size:0.65rem;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;padding:4px 10px;border-radius:20px;background:rgba(201,168,76,0.12);color:var(--gold);border:1px solid rgba(201,168,76,0.25);flex-shrink:0">LOBBY</span>') +
+          '</div>';
+      });
+    }
+
+    if (ended.length > 0) {
+      html += '<div style="font-family:var(--display);font-size:0.9rem;font-weight:600;color:var(--muted);padding:14px 2px 8px">Completed</div>';
+      ended.slice(0, 3).forEach(g => {
+        const dateStr = g.gameDate
+          ? new Date(g.gameDate).toLocaleDateString(undefined, { day:'numeric', month:'short' })
+          : '';
+        html +=
+          '<div class="game-card" data-code="' + g.code + '" style="margin-bottom:8px;opacity:0.7">' +
+            '<div class="game-card-icon" style="background:linear-gradient(135deg,#1a1a2a,#0d0d1a)">🏁</div>' +
+            '<div class="game-card-body">' +
+              '<div class="game-card-name">' + esc(g.name) + '</div>' +
+              '<div class="game-card-meta">' + esc(dateStr) +
+                (g.stakes ? ' · ' + esc(g.stakes) : '') +
+              '</div>' +
+            '</div>' +
+            '<span style="font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">ENDED</span>' +
+          '</div>';
+      });
+    }
+
+    container.innerHTML = '<div style="margin-bottom:14px">' + html + '</div>';
+
+    // Wire up card clicks
+    container.querySelectorAll('.game-card[data-code]').forEach(card => {
+      card.addEventListener('click', async () => {
+        const code = card.dataset.code;
+        const game = cloudGames.find(g => g.code === code);
+        if (!game) return;
+        // Load full game state from cloud
+        try {
+          const data = await apiGetGame(code);
+          if (data && data.state) {
+            state = data.state;
+            saveState();
+            setCloudRole('host', code, 'Host');
+            if (game.lobbyActive && !game.ended) {
+              const inviteLink = buildGroupLink('rsvp');
+              openLobby(game.name, game.stakes, game.gameDate, game.location, game.seats || 9, inviteLink, code);
+            } else if (!game.ended) {
+              openGameWithPasswordCheck();
+            } else {
+              // Show ended game results
+              showScreen('resultsScreen');
+              renderResults();
+            }
+          }
+        } catch(e) {
+          toast('Could not load game — check connection');
+        }
+      });
+    });
+  });
 }
+
 
 function renderLeaderboardTab(body) {
   const stats = getStats();
@@ -1505,7 +1532,8 @@ async function confirmNewGame() {
 
     // Link this game to the group and notify existing subscribers
     if (cloudGroupId) {
-      await apiGroupSetGame(cloudGroupId, code).catch(() => {});
+      await apiGroupAddGame(cloudGroupId, code).catch(() => {});
+      await apiGroupSetGame(cloudGroupId, code).catch(() => {}); // backwards compat
       const dateStr = gameDate
         ? new Date(gameDate).toLocaleDateString(undefined, { weekday:'short', day:'numeric', month:'short' })
           + ' at ' + new Date(gameDate).toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' })
@@ -1825,6 +1853,8 @@ function endGame() {
       const endedState = JSON.parse(JSON.stringify(state)); // deep copy
       endedState.game = Object.assign({}, endedState.game, { ended: true });
       await apiSetState(cloudGameCode, endedState).catch(() => {});
+      // Remove from group's active games list
+      if (cloudGroupId) await apiGroupEndGame(cloudGroupId, cloudGameCode).catch(() => {});
       // Notify all players game has ended
       await notifyAll('Game Over!', (state.game ? state.game.name : 'Poker Night') + ' has ended. Check your settlements!');
     }
